@@ -5,30 +5,40 @@ import openmeteo_requests
 import requests_cache
 from retry_requests import retry
 import datetime
+import os
+import json
 
-# Import logic AI từ file ml_forecaster.py
-from ml_forecaster import predict_core_weather,evaluate_models
 
 app = Flask(__name__)
 CORS(app)
 
 # =====================================================================
-# KHỞI ĐỘNG AI VÀ TÍNH TOÁN TRƯỚC (PRE-COMPUTATION)
+# TẢI DỮ LIỆU DỰ ĐOÁN TỪ CSV VÀO BỘ NHỚ RAM (CHỈ CHẠY 1 LẦN)
 # ===================================================================== 
-DEFAULT_LAT = 16.1667
-DEFAULT_LON = 107.8333
-MAX_PREDICT_DAYS = 30 
-PRECALCULATED_DATA = []
+csv_path = os.path.join(os.getcwd(), "predictions_2026.csv") 
 
-print("\n" + "="*60)
-print("🚀 HỆ THỐNG ĐANG KHỞI ĐỘNG...")
 try:
-    PRECALCULATED_DATA = predict_core_weather(DEFAULT_LAT, DEFAULT_LON, MAX_PREDICT_DAYS)
-    print("✅ HUẤN LUYỆN HOÀN TẤT! AI đã sẵn sàng phục vụ.")
-    print("="*60 + "\n")
+    df_predictions = pd.read_csv(csv_path)
+    df_predictions['Date'] = df_predictions['date'].astype(str)
+    print(f"✅ Đã tải thành công dữ liệu dự báo từ: {csv_path}")
 except Exception as e:
-    print(f"❌ Lỗi khởi động AI: {e}")
-    PRECALCULATED_DATA = []
+    print(f"⚠️ CẢNH BÁO: Không tìm thấy file CSV hoặc file bị lỗi. Lỗi: {e}")
+    df_predictions = pd.DataFrame()
+
+# TẢI ĐỘ TIN CẬY CỦA MÔ HÌNH VÀO RAM
+eval_path = os.path.join(os.getcwd(), "model_metrics.json")
+try:
+    with open(eval_path, "r", encoding="utf-8") as f:
+        model_metrics = json.load(f)
+    print("✅ Đã tải thành công báo cáo độ tin cậy AI.")
+except Exception as e:
+    print(f"⚠️ Không tìm thấy file model_metrics.json: {e}")
+    model_metrics = {}
+
+# Tọa độ mặc định (Thành phố Hồ Chí Minh)
+DEFAULT_LAT = 10.7626
+DEFAULT_LON = 106.6602
+
 
 # 1. THIẾT LẬP CACHE VÀ RETRY CHO API THÔNG THƯỜNG
 cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
@@ -161,60 +171,90 @@ def get_weather_data():
     except Exception as e:
         return jsonify({"status": "error", "message": f"Lỗi hệ thống: {str(e)}"}), 500
 
+# =====================================================================
+# API DỰ ĐOÁN THỜI TIẾT TỪ MÔ HÌNH MACHINE LEARNING
+# =====================================================================
 @app.route('/api/predict_core', methods=['GET'])
 def get_core_predictions():
     try:
-        days_requested = int(request.args.get('days', 7))
-        if days_requested <= 0 or days_requested > MAX_PREDICT_DAYS:
-             return jsonify({"status": "error", "message": f"Hỗ trợ dự báo tối đa {MAX_PREDICT_DAYS} ngày."}), 400
-        if not PRECALCULATED_DATA:
-            return jsonify({"status": "error", "message": "Mô hình AI chưa sẵn sàng."}), 500
+        # Lấy ngày được yêu cầu từ URL (Ví dụ: /api/predict_core?date=2026-05-20)
+        target_date_raw = request.args.get('date')
 
-        prediction_result = PRECALCULATED_DATA[:days_requested]
+        if not target_date_raw:
+            return jsonify({
+                "status": "error", 
+                "message": "Vui lòng cung cấp tham số 'date'"
+            }), 400
 
-        return jsonify({
+        try:
+            # pd.to_datetime sẽ biến "2026-9-5" thành "2026-09-05" một cách kỳ diệu
+            target_date = pd.to_datetime(target_date_raw).strftime('%Y-%m-%d')
+        except Exception:
+            return jsonify({
+                "status": "error", 
+                "message": "Định dạng ngày không hợp lệ. Vui lòng nhập ngày thực tế."
+            }), 400
+        # -------------------------------------------------------------
+
+        if df_predictions.empty:
+            return jsonify({
+                "status": "error", 
+                "message": "Dữ liệu học máy chưa sẵn sàng. Vui lòng kiểm tra lại file CSV."
+            }), 500
+
+        # 2. Lọc ra dòng dữ liệu khớp với ngày đã được chuẩn hóa
+        row_data = df_predictions[df_predictions['date'] == target_date]
+
+        if row_data.empty:
+            return jsonify({
+                "status": "error", 
+                "message": f"Không có kết quả dự báo cho ngày {target_date}."
+            }), 404
+
+        # Trích xuất dòng dữ liệu đầu tiên
+        row = row_data.iloc[0]
+
+        # Đóng gói dữ liệu thành JSON Nested
+        response_data = {
             "status": "success",
             "meta": {
-                "latitude": DEFAULT_LAT, "longitude": DEFAULT_LON,
-                "days_predicted": days_requested,
-                "algorithms": ["RandomForest", "LinearRegression", "XGBoost_GBT"]
-            },
-            "data": prediction_result
-        }), 200
-    except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
-
-
-# 2. Dán Endpoint mới này vào dưới cùng, ngay trên khối if __name__ == '__main__':
-@app.route('/api/evaluate_models', methods=['GET'])
-def get_model_evaluation():
-    try:
-        print("\n📊 Đang chạy bộ chấm điểm mô hình (Train 70% / Test 30%)...")
-        print("⏳ Quá trình này sẽ chạy 100 Trees nên có thể mất 1-3 phút...")
-        
-        # Gọi hàm chấm điểm
-        eval_results = evaluate_models(DEFAULT_LAT, DEFAULT_LON)
-        
-        return jsonify({
-            "status": "success",
-            "meta": {
-                "latitude": DEFAULT_LAT,
+                "latitude": DEFAULT_LAT, 
                 "longitude": DEFAULT_LON,
-                "description": "Báo cáo chỉ số đánh giá mô hình học máy",
-                "metrics_explained": {
-                    "RMSE": "Càng nhỏ càng tốt (<2 là xuất sắc)",
-                    "MAE": "Sai số tuyệt đối trung bình (Độ C, mm, km/h)",
-                    "R2": "Độ khớp của mô hình (Càng gần 1 càng tốt)",
-                    "MSE": "Sai số bình phương trung bình"
-                }
+                "date_requested": target_date,
+                "algorithms_used": ["RandomForest", "LinearRegression", "XGB_GBT"],
+                "model_accuracy": model_metrics
             },
-            "data": eval_results
-        }), 200
+            "data": {
+                "date": target_date,
+                "temperature_2m_max": {
+                    "RandomForest": row.get("temperature_2m_max_RandomForest"),
+                    "LinearRegression": row.get("temperature_2m_max_LinearRegression"),
+                    "XGB": row.get("temperature_2m_max_GBT")
+                },
+                "temperature_2m_min": {
+                    "RandomForest": row.get("temperature_2m_min_RandomForest"),
+                    "LinearRegression": row.get("temperature_2m_min_LinearRegression"),
+                    "XGB": row.get("temperature_2m_min_GBT")
+                },
+                "precipitation_sum": {
+                    "RandomForest": row.get("precipitation_sum_RandomForest"),
+                    "LinearRegression": row.get("precipitation_sum_LinearRegression"),
+                    "XGB": row.get("precipitation_sum_GBT")
+                },
+                "wind_speed_10m_max": {
+                    "RandomForest": row.get("wind_speed_10m_max_RandomForest"),
+                    "LinearRegression": row.get("wind_speed_10m_max_LinearRegression"),
+                    "XGB": row.get("wind_speed_10m_max_GBT")
+                }
+            }
+        }
+
+        return jsonify(response_data), 200
 
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        return jsonify({"status": "error", "message": f"Lỗi xử lý dự báo: {str(e)}"}), 500
 
 
 
 if __name__ == '__main__':
-    app.run(debug=True, use_reloader=False, port=5000)
+    app.run(debug=True, port=5000)
