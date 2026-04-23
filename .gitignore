@@ -1,8 +1,14 @@
 __pycache__/
 *.pyc
-.ipynb_checkpoints/
-.DS_Store
+*.cache.sqlite
 .cache.sqlite
 *.csv
 *.json
-saved_weather_models/
+learn.ipynb
+test.ipynb
+test
+models
+predict
+reports
+historical
+learn.py

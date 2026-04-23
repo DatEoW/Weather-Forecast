@@ -7,45 +7,99 @@ from retry_requests import retry
 import datetime
 import os
 import json
+import math
+import re
+
 
 
 app = Flask(__name__)
 CORS(app)
 
+# TẮT TÍNH NĂNG TỰ ĐỘNG SẮP XẾP A-Z CỦA FLASK
+app.json.sort_keys = False
+
+
 # =====================================================================
-# TẢI DỮ LIỆU DỰ ĐOÁN TỪ CSV VÀO BỘ NHỚ RAM (CHỈ CHẠY 1 LẦN)
+# 1. TỪ ĐIỂN TỌA ĐỘ 63 TỈNH THÀNH & HÀM XỬ LÝ VỊ TRÍ
+# =====================================================================
+VIETNAM_PROVINCES = {
+    "An Giang": {"lat": 10.5216, "lon": 105.1259}, "Bà Rịa - Vũng Tàu": {"lat": 10.4973, "lon": 107.1683},
+    "Bạc Liêu": {"lat": 9.2941, "lon": 105.7278}, "Bắc Giang": {"lat": 21.2731, "lon": 106.1946},
+    "Bắc Kạn": {"lat": 22.1470, "lon": 105.8348}, "Bắc Ninh": {"lat": 21.1861, "lon": 106.0763},
+    "Bến Tre": {"lat": 10.2385, "lon": 106.3774}, "Bình Dương": {"lat": 11.1661, "lon": 106.6263},
+    "Bình Định": {"lat": 13.7820, "lon": 109.2197}, "Bình Phước": {"lat": 11.7517, "lon": 106.9230},
+    "Bình Thuận": {"lat": 10.9333, "lon": 108.1000}, "Cà Mau": {"lat": 8.9114, "lon": 105.1500},
+    "Cao Bằng": {"lat": 22.6667, "lon": 106.2500}, "Cần Thơ": {"lat": 10.0222, "lon": 105.7145},
+    "Đà Nẵng": {"lat": 16.0544, "lon": 108.2022}, "Đắk Lắk": {"lat": 12.6667, "lon": 108.0333},
+    "Đắk Nông": {"lat": 12.0000, "lon": 107.6917}, "Điện Biên": {"lat": 21.3833, "lon": 103.0167},
+    "Đồng Nai": {"lat": 10.9412, "lon": 106.8202}, "Đồng Tháp": {"lat": 10.4608, "lon": 105.6358},
+    "Gia Lai": {"lat": 13.9833, "lon": 108.0000}, "Hà Giang": {"lat": 22.8167, "lon": 104.9833},
+    "Hà Nam": {"lat": 20.5312, "lon": 105.9234}, "Hà Nội": {"lat": 21.0285, "lon": 105.8542},
+    "Hà Tĩnh": {"lat": 18.3333, "lon": 105.9000}, "Hải Dương": {"lat": 20.9388, "lon": 106.3214},
+    "Hải Phòng": {"lat": 20.8449, "lon": 106.6881}, "Hậu Giang": {"lat": 9.7828, "lon": 105.4711},
+    "Hòa Bình": {"lat": 20.8167, "lon": 105.3333}, "Hưng Yên": {"lat": 20.6483, "lon": 106.0506},
+    "Khánh Hòa": {"lat": 12.2388, "lon": 109.1967}, "Kiên Giang": {"lat": 10.0125, "lon": 105.0809},
+    "Kon Tum": {"lat": 14.3500, "lon": 108.0000}, "Lai Châu": {"lat": 22.3833, "lon": 103.4500},
+    "Lạng Sơn": {"lat": 21.8478, "lon": 106.7581}, "Lào Cai": {"lat": 22.4833, "lon": 103.9667},
+    "Lâm Đồng": {"lat": 11.9465, "lon": 108.4419}, "Long An": {"lat": 10.5333, "lon": 106.4000},
+    "Nam Định": {"lat": 20.4333, "lon": 106.1667}, "Nghệ An": {"lat": 18.6667, "lon": 105.6667},
+    "Ninh Bình": {"lat": 20.2539, "lon": 105.9750}, "Ninh Thuận": {"lat": 11.5667, "lon": 108.9833},
+    "Phú Thọ": {"lat": 21.3333, "lon": 105.2167}, "Phú Yên": {"lat": 13.0833, "lon": 109.3000},
+    "Quảng Bình": {"lat": 17.4833, "lon": 106.6000}, "Quảng Nam": {"lat": 15.5833, "lon": 108.0000},
+    "Quảng Ngãi": {"lat": 15.1167, "lon": 108.8000}, "Quảng Ninh": {"lat": 20.9500, "lon": 107.0833},
+    "Quảng Trị": {"lat": 16.7500, "lon": 107.1833}, "Sóc Trăng": {"lat": 9.6000, "lon": 105.9667},
+    "Sơn La": {"lat": 21.3333, "lon": 103.9000}, "Tây Ninh": {"lat": 11.3000, "lon": 106.1000},
+    "Thái Bình": {"lat": 20.4500, "lon": 106.3333}, "Thái Nguyên": {"lat": 21.5942, "lon": 105.8482},
+    "Thanh Hóa": {"lat": 19.8000, "lon": 105.7667}, "Thừa Thiên Huế": {"lat": 16.4667, "lon": 107.5833},
+    "Tiền Giang": {"lat": 10.3541, "lon": 106.3571}, "Thành phố Hồ Chí Minh": {"lat": 10.7626, "lon": 106.6602},
+    "Trà Vinh": {"lat": 9.9333, "lon": 106.3500}, "Tuyên Quang": {"lat": 21.8167, "lon": 105.2167},
+    "Vĩnh Long": {"lat": 10.2500, "lon": 105.9667}, "Vĩnh Phúc": {"lat": 21.3000, "lon": 105.6000},
+    "Yên Bái": {"lat": 21.7167, "lon": 104.8833}
+}
+
+def get_closest_province(lat, lon):
+    """Tính khoảng cách Haversine để map tọa độ client sang Tỉnh gần nhất"""
+    def haversine(lat1, lon1, lat2, lon2):
+        R = 6371
+        dlat, dlon = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+        a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+        return R * (2 * math.atan2(math.sqrt(a), math.sqrt(1 - a)))
+
+    closest = min(VIETNAM_PROVINCES.keys(), key=lambda p: haversine(lat, lon, VIETNAM_PROVINCES[p]["lat"], VIETNAM_PROVINCES[p]["lon"]))
+    return closest
+
+# =====================================================================
+# 2. TẢI DỮ LIỆU DỰ ĐOÁN AI VÀ BÁO CÁO ĐỘ TIN CẬY VÀO RAM
 # ===================================================================== 
-csv_path = os.path.join(os.getcwd(), "predictions_2026.csv") 
+csv_path = os.path.join(os.getcwd(), "predict", "Single", "DuDoan_Gop_Single_1.csv") 
+eval_path = os.path.join(os.getcwd(), "reports", "Single", "BaoCao_Gop_Single_1.json")
 
 try:
     df_predictions = pd.read_csv(csv_path)
-    df_predictions['Date'] = df_predictions['date'].astype(str)
-    print(f"✅ Đã tải thành công dữ liệu dự báo từ: {csv_path}")
+    df_predictions['datetime'] = df_predictions['datetime'].astype(str)
+    print(f"✅ Đã tải dữ liệu dự báo từ: {csv_path}")
 except Exception as e:
-    print(f"⚠️ CẢNH BÁO: Không tìm thấy file CSV hoặc file bị lỗi. Lỗi: {e}")
+    print(f"⚠️ Không tìm thấy file CSV. Lỗi: {e}")
     df_predictions = pd.DataFrame()
 
-# TẢI ĐỘ TIN CẬY CỦA MÔ HÌNH VÀO RAM
-eval_path = os.path.join(os.getcwd(), "model_metrics.json")
 try:
     with open(eval_path, "r", encoding="utf-8") as f:
         model_metrics = json.load(f)
-    print("✅ Đã tải thành công báo cáo độ tin cậy AI.")
+    print("✅ Đã tải báo cáo độ tin cậy AI.")
 except Exception as e:
-    print(f"⚠️ Không tìm thấy file model_metrics.json: {e}")
+    print(f"⚠️ Không tìm thấy file JSON: {e}")
     model_metrics = {}
 
-# Tọa độ mặc định (Thành phố Hồ Chí Minh)
 DEFAULT_LAT = 10.7626
 DEFAULT_LON = 106.6602
 
-
-# 1. THIẾT LẬP CACHE VÀ RETRY CHO API THÔNG THƯỜNG
+# =====================================================================
+# 3. THIẾT LẬP KẾT NỐI OPEN-METEO API
+# =====================================================================
 cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
 retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
 openmeteo = openmeteo_requests.Client(session=retry_session)
 
-# 2. TỪ ĐIỂN ĐẦY ĐỦ CÁC TRƯỜNG DỮ LIỆU
 ALL_FIELDS = {
     "daily": [
         "weather_code", "temperature_2m_max", "temperature_2m_min", "apparent_temperature_max", 
@@ -83,14 +137,17 @@ ALL_FIELDS = {
     ]
 }
 
+# =====================================================================
+# ROUTE 1: LẤY DỮ LIỆU THỜI TIẾT TỪ OPEN-METEO (THỜI GIAN THỰC/QUÁ KHỨ)
+# =====================================================================
 @app.route('/api/weather', methods=['GET'])
 def get_weather_data():
     try:
         api_type = request.args.get('api_type', 'forecast') 
         interval = request.args.get('interval', 'hourly')
         fields_param = request.args.get('fields') 
-        lat = request.args.get('latitude', default=10.8231, type=float)
-        lon = request.args.get('longitude', default=106.6297, type=float)
+        lat = request.args.get('latitude', default=DEFAULT_LAT, type=float)
+        lon = request.args.get('longitude', default=DEFAULT_LON, type=float)
         
         start_date = request.args.get('start_date')
         end_date = request.args.get('end_date')
@@ -100,10 +157,7 @@ def get_weather_data():
         if interval not in ALL_FIELDS:
             return jsonify({"status": "error", "message": "Interval không hợp lệ"}), 400
 
-        # Lấy tất cả các trường có sẵn cho interval đó
         all_fields_for_interval = ALL_FIELDS[interval]
-        
-        # SỬA LỖI: Ghi nhận yêu cầu của Client nhưng không xóa dữ liệu
         client_requested_fields = fields_param.split(',') if fields_param else all_fields_for_interval
 
         url_mapping = {
@@ -116,7 +170,7 @@ def get_weather_data():
         params = {
             "latitude": lat, "longitude": lon,
             "timezone": "Asia/Bangkok",
-            interval: all_fields_for_interval # Luôn lấy 100% dữ liệu từ API
+            interval: all_fields_for_interval
         }
 
         if start_date and end_date:
@@ -159,102 +213,121 @@ def get_weather_data():
 
         return jsonify({
             "status": "success",
+            "data": result_json,
             "meta": {
                 "latitude": lat, 
                 "longitude": lon, 
                 "api_used": api_type, 
                 "interval": interval,
-                "client_requested_fields": client_requested_fields # Trả về danh sách client yêu cầu ở đây
-            },
-            "data": result_json # Trả về 100% dữ liệu gốc
+                "client_requested_fields": client_requested_fields
+            }
         }), 200
     except Exception as e:
         return jsonify({"status": "error", "message": f"Lỗi hệ thống: {str(e)}"}), 500
 
+
 # =====================================================================
-# API DỰ ĐOÁN THỜI TIẾT TỪ MÔ HÌNH MACHINE LEARNING
+# ROUTE 2: LẤY DỮ LIỆU DỰ ĐOÁN TỪ MACHINE LEARNING (CẬP NHẬT TÁCH INPUT)
 # =====================================================================
 @app.route('/api/predict_core', methods=['GET'])
 def get_core_predictions():
     try:
-        # Lấy ngày được yêu cầu từ URL (Ví dụ: /api/predict_core?date=2026-05-20)
+        lat = request.args.get('latitude', default=DEFAULT_LAT, type=float)
+        lon = request.args.get('longitude', default=DEFAULT_LON, type=float)
         target_date_raw = request.args.get('date')
+        target_hour_raw = request.args.get('hour')
+        client_requested_fields = request.args.get('fields', 'all') 
 
-        if not target_date_raw:
+        if not target_date_raw or target_hour_raw is None:
             return jsonify({
                 "status": "error", 
-                "message": "Vui lòng cung cấp tham số 'date'"
+                "message": "Thiếu tham số. Vui lòng cung cấp đủ 'date' (VD: 2026-04-22 hoặc 22-04-2026) và 'hour' (VD: 12)."
             }), 400
+
+        province_name = get_closest_province(lat, lon)
 
         try:
-            # pd.to_datetime sẽ biến "2026-9-5" thành "2026-09-05" một cách kỳ diệu
-            target_date = pd.to_datetime(target_date_raw).strftime('%Y-%m-%d')
-        except Exception:
+            # BƯỚC XỬ LÝ 1: Nắn ngày chuẩn
+            parsed_date = pd.to_datetime(target_date_raw, dayfirst=True)
+            formatted_date = parsed_date.strftime('%Y-%m-%d')
+            
+            # BƯỚC XỬ LÝ 2: Nắn giờ chuẩn
+            hour_match = re.search(r'\d+', str(target_hour_raw))
+            if not hour_match:
+                raise ValueError(f"Không tìm thấy số trong tham số hour: '{target_hour_raw}'")
+            
+            hour_int = int(hour_match.group())
+            if not (0 <= hour_int <= 23):
+                raise ValueError(f"Giờ ({hour_int}) vi phạm giới hạn 0-23")
+            formatted_hour = f"{hour_int:02d}:00:00"
+            
+            target_datetime = f"{formatted_date} {formatted_hour}"
+            
+        except Exception as e:
+            # MỞ KHÓA BẮT LỖI: Nhả chính xác lý do hỏng ra Postman để bạn dễ sửa
             return jsonify({
                 "status": "error", 
-                "message": "Định dạng ngày không hợp lệ. Vui lòng nhập ngày thực tế."
+                "message": "Định dạng ngày/giờ không hợp lệ.",
+                "chi_tiet_loi_he_thong": str(e),
+                "du_lieu_ban_da_gui": {
+                    "date": target_date_raw, 
+                    "hour": target_hour_raw
+                }
             }), 400
-        # -------------------------------------------------------------
 
         if df_predictions.empty:
-            return jsonify({
-                "status": "error", 
-                "message": "Dữ liệu học máy chưa sẵn sàng. Vui lòng kiểm tra lại file CSV."
-            }), 500
+            return jsonify({"status": "error", "message": "Dữ liệu AI chưa sẵn sàng."}), 500
 
-        # 2. Lọc ra dòng dữ liệu khớp với ngày đã được chuẩn hóa
-        row_data = df_predictions[df_predictions['date'] == target_date]
+        row_data = df_predictions[(df_predictions['province'] == province_name) & (df_predictions['datetime'] == target_datetime)]
 
         if row_data.empty:
-            return jsonify({
-                "status": "error", 
-                "message": f"Không có kết quả dự báo cho ngày {target_date}."
-            }), 404
+            return jsonify({"status": "error", "message": f"Không có dữ liệu cho {province_name} lúc {target_datetime}."}), 404
 
-        # Trích xuất dòng dữ liệu đầu tiên
         row = row_data.iloc[0]
 
-        # Đóng gói dữ liệu thành JSON Nested
+        # Đóng gói Response trả về Frontend 
         response_data = {
             "status": "success",
-            "meta": {
-                "latitude": DEFAULT_LAT, 
-                "longitude": DEFAULT_LON,
-                "date_requested": target_date,
-                "algorithms_used": ["RandomForest", "LinearRegression", "XGB_GBT"],
-                "model_accuracy": model_metrics
-            },
             "data": {
-                "date": target_date,
-                "temperature_2m_max": {
-                    "RandomForest": row.get("temperature_2m_max_RandomForest"),
-                    "LinearRegression": row.get("temperature_2m_max_LinearRegression"),
-                    "XGB": row.get("temperature_2m_max_GBT")
+                "datetime": target_datetime,
+                "province": province_name,
+                "temperature_2m": {
+                    "Random_Forest": row.get("temperature_2m_Random_Forest"),
+                    "Linear_Regression": row.get("temperature_2m_Linear_Regression"),
+                    "GBT": row.get("temperature_2m_GBT")
                 },
-                "temperature_2m_min": {
-                    "RandomForest": row.get("temperature_2m_min_RandomForest"),
-                    "LinearRegression": row.get("temperature_2m_min_LinearRegression"),
-                    "XGB": row.get("temperature_2m_min_GBT")
+                "relative_humidity_2m": {
+                    "Random_Forest": row.get("relative_humidity_2m_Random_Forest"),
+                    "Linear_Regression": row.get("relative_humidity_2m_Linear_Regression"),
+                    "GBT": row.get("relative_humidity_2m_GBT")
                 },
-                "precipitation_sum": {
-                    "RandomForest": row.get("precipitation_sum_RandomForest"),
-                    "LinearRegression": row.get("precipitation_sum_LinearRegression"),
-                    "XGB": row.get("precipitation_sum_GBT")
+                "wind_speed_10m": {
+                    "Random_Forest": row.get("wind_speed_10m_Random_Forest"),
+                    "Linear_Regression": row.get("wind_speed_10m_Linear_Regression"),
+                    "GBT": row.get("wind_speed_10m_GBT")
                 },
-                "wind_speed_10m_max": {
-                    "RandomForest": row.get("wind_speed_10m_max_RandomForest"),
-                    "LinearRegression": row.get("wind_speed_10m_max_LinearRegression"),
-                    "XGB": row.get("wind_speed_10m_max_GBT")
+                "precipitation": {
+                    "Random_Forest": row.get("precipitation_Random_Forest"),
+                    "Linear_Regression": row.get("precipitation_Linear_Regression"),
+                    "GBT": row.get("precipitation_GBT")
                 }
+            },
+            "meta": {
+                "client_request": {
+                    "latitude": lat, 
+                    "longitude": lon,
+                    "date_input": target_date_raw, 
+                    "hour_input": target_hour_raw,
+                    "fields_requested": client_requested_fields,
+                    "province_matched": province_name,
+                },
+                # "model_accuracy": model_metrics     đây là phần 4 độ tin cậy cho từng report
             }
         }
-
         return jsonify(response_data), 200
 
     except Exception as e:
-        return jsonify({"status": "error", "message": f"Lỗi xử lý dự báo: {str(e)}"}), 500
-
-
+        return jsonify({"status": "error", "message": f"Lỗi hệ thống AI: {str(e)}"}), 500        
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
