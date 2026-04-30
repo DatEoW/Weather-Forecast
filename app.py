@@ -19,9 +19,9 @@ CORS(app)
 app.json.sort_keys = False
 
 
-# =====================================================================
+
 # 1. TỪ ĐIỂN TỌA ĐỘ 63 TỈNH THÀNH & HÀM XỬ LÝ VỊ TRÍ
-# =====================================================================
+
 VIETNAM_PROVINCES = {
     "An Giang": {"lat": 10.5216, "lon": 105.1259}, "Bà Rịa - Vũng Tàu": {"lat": 10.4973, "lon": 107.1683},
     "Bạc Liêu": {"lat": 9.2941, "lon": 105.7278}, "Bắc Giang": {"lat": 21.2731, "lon": 106.1946},
@@ -51,7 +51,7 @@ VIETNAM_PROVINCES = {
     "Sơn La": {"lat": 21.3333, "lon": 103.9000}, "Tây Ninh": {"lat": 11.3000, "lon": 106.1000},
     "Thái Bình": {"lat": 20.4500, "lon": 106.3333}, "Thái Nguyên": {"lat": 21.5942, "lon": 105.8482},
     "Thanh Hóa": {"lat": 19.8000, "lon": 105.7667}, "Thừa Thiên Huế": {"lat": 16.4667, "lon": 107.5833},
-    "Tiền Giang": {"lat": 10.3541, "lon": 106.3571}, "Thành phố Hồ Chí Minh": {"lat": 10.7626, "lon": 106.6602},
+    "Tiền Giang": {"lat": 10.3541, "lon": 106.3571}, "Hồ Chí Minh": {"lat": 10.7626, "lon": 106.6602},
     "Trà Vinh": {"lat": 9.9333, "lon": 106.3500}, "Tuyên Quang": {"lat": 21.8167, "lon": 105.2167},
     "Vĩnh Long": {"lat": 10.2500, "lon": 105.9667}, "Vĩnh Phúc": {"lat": 21.3000, "lon": 105.6000},
     "Yên Bái": {"lat": 21.7167, "lon": 104.8833}
@@ -68,11 +68,11 @@ def get_closest_province(lat, lon):
     closest = min(VIETNAM_PROVINCES.keys(), key=lambda p: haversine(lat, lon, VIETNAM_PROVINCES[p]["lat"], VIETNAM_PROVINCES[p]["lon"]))
     return closest
 
-# =====================================================================
+
 # 2. TẢI DỮ LIỆU DỰ ĐOÁN AI VÀ BÁO CÁO ĐỘ TIN CẬY VÀO RAM
-# ===================================================================== 
-csv_path = os.path.join(os.getcwd(), "predict", "Single", "DuDoan_Gop_Single_1.csv") 
-eval_path = os.path.join(os.getcwd(), "reports", "Single", "BaoCao_Gop_Single_1.json")
+
+csv_path = os.path.join(os.getcwd(), "predict", "Ultimate", "DuDoan_Ultimate_1.csv") 
+eval_path = os.path.join(os.getcwd(), "reports", "Ultimate", "BaoCao_Ultimate_1.json")
 
 try:
     df_predictions = pd.read_csv(csv_path)
@@ -93,9 +93,9 @@ except Exception as e:
 DEFAULT_LAT = 10.7626
 DEFAULT_LON = 106.6602
 
-# =====================================================================
+
 # 3. THIẾT LẬP KẾT NỐI OPEN-METEO API
-# =====================================================================
+
 cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
 retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
 openmeteo = openmeteo_requests.Client(session=retry_session)
@@ -137,9 +137,9 @@ ALL_FIELDS = {
     ]
 }
 
-# =====================================================================
+
 # ROUTE 1: LẤY DỮ LIỆU THỜI TIẾT TỪ OPEN-METEO (THỜI GIAN THỰC/QUÁ KHỨ)
-# =====================================================================
+
 @app.route('/api/weather', methods=['GET'])
 def get_weather_data():
     try:
@@ -237,15 +237,15 @@ def get_core_predictions():
         target_date_raw = request.args.get('date')
         target_hour_raw = request.args.get('hour')
         client_requested_fields = request.args.get('fields', 'all') 
-
+        province_name = get_closest_province(lat, lon)
         if not target_date_raw or target_hour_raw is None:
             return jsonify({
                 "status": "error", 
                 "message": "Thiếu tham số. Vui lòng cung cấp đủ 'date' (VD: 2026-04-22 hoặc 22-04-2026) và 'hour' (VD: 12)."
             }), 400
 
-        province_name = get_closest_province(lat, lon)
-
+        
+       
         try:
             # BƯỚC XỬ LÝ 1: Nắn ngày chuẩn
             parsed_date = pd.to_datetime(target_date_raw, dayfirst=True)

@@ -7,8 +7,8 @@ __pycache__/
 learn.ipynb
 test.ipynb
 test
+learn.py
 models
 predict
-reports
 historical
-learn.py
+reports
